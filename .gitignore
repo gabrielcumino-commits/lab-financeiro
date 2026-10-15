@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Ambientes virtuais
+.venv/
+venv/
+
+# Editor e sistema
+.vscode/
+.idea/
+.DS_Store
+
+# Segredos
+.env
+
+# Dados reais (nunca versionar)
+data/raw/
+data/processed/
