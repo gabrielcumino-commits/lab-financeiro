@@ -1,9 +1,9 @@
-
 import numpy as np
 import pandas as pd
 
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+from src.evaluation import calcular_metricas, mae
 
 
 def avaliar_modelo(dados, meses_teste=2):
@@ -28,10 +28,7 @@ def avaliar_modelo(dados, meses_teste=2):
 
     previsoes = modelo.predict(X_teste)
 
-    metricas = {
-        "mae": mean_absolute_error(y_teste, previsoes),
-        "rmse": np.sqrt(mean_squared_error(y_teste, previsoes)),
-    }
+    metricas = calcular_metricas(y_teste, previsoes)
 
     resultados = pd.DataFrame({
         "receita_real": y_teste,
@@ -83,10 +80,6 @@ def prever_proximos_meses(dados, meses_futuros=3):
     return previsoes
 
 
-
-
-
-
 def comparar_modelos(dados, meses_teste=2):
     dados = dados.sort_values("data").reset_index(drop=True)
 
@@ -118,12 +111,8 @@ def comparar_modelos(dados, meses_teste=2):
     })
 
     metricas = {
-        "mae_regressao": mean_absolute_error(
-            reais, previsao_regressao
-        ),
-        "mae_ingenua": mean_absolute_error(
-            reais, previsao_ingenua
-        ),
+        "mae_regressao": mae(reais, previsao_regressao),
+        "mae_ingenua": mae(reais, previsao_ingenua),
     }
 
     return metricas, comparacao

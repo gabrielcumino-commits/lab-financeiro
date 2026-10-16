@@ -1,25 +1,45 @@
-
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+from src.analysis import calcular_estatisticas, calcular_indicadores
+from src.data_loader import carregar_dados
 from src.exporting import exportar_csv, exportar_excel
-
-
-from src.report import gerar_relatorio
-
-
-from src.analysis import (
-    calcular_indicadores,
-    calcular_estatisticas,
+from src.features import (
+    adicionar_medias_moveis,
+    calcular_correlacao,
+    calcular_tendencia,
+    verificar_normalidade,
 )
-from src.preprocessing import limpar_dados , validar_dados
 from src.forecasting import (
     avaliar_modelo,
-    prever_proximos_meses,
     comparar_modelos,
+    prever_proximos_meses,
 )
+from src.preprocessing import limpar_dados, validar_dados
+from src.report import gerar_relatorio
+from src.timeseries import (
+    MINIMO_ADF,
+    PERIODO_SAZONAL,
+    TREINO_MINIMO,
+    decompor_serie,
+    prever_holt_winters,
+    validar_walk_forward,
+    verificar_estacionariedade,
+)
+from src.visualization import (
+    grafico_decomposicao,
+    grafico_previsao,
+    grafico_receita_despesas,
+    grafico_walk_forward,
+)
+
+
+def formatar_p(p_valor):
+    if p_valor < 0.001:
+        return "p < 0,001"
+    return f"p = {p_valor:.3f}".replace(".", ",")
 
 
 st.set_page_config(
@@ -31,6 +51,13 @@ st.set_page_config(
 st.title("Lab Financeiro")
 st.write("Análise quantitativa de fluxo de caixa")
 
+# ---------------------------------------------------------------- Carga
+separador_decimal = st.radio(
+    "Separador decimal do arquivo (CSV)",
+    options=[".", ","],
+    horizontal=True,
+)
+
 arquivo = st.file_uploader(
     "Carregue uma planilha financeira",
     type=["csv", "xlsx"],
@@ -38,20 +65,10 @@ arquivo = st.file_uploader(
 
 if arquivo is not None:
     try:
-        if arquivo.name.endswith(".csv"):
-            dados_originais = pd.read_csv(arquivo)
-        else:
-            dados_originais = pd.read_excel(arquivo)
-
+        dados_originais = carregar_dados(arquivo, decimal=separador_decimal)
         dados = limpar_dados(dados_originais)
 
-        if len(dados) < 4:
-            st.error(
-                "A planilha precisa ter pelo menos 4 registros válidos."
-            )
-            st.stop()
-
-        st.success("Arquivo carregado e dados validados.")
+        st.success("Arquivo carregado com sucesso.")
 
     except Exception as erro:
         st.error(f"Não foi possível processar o arquivo: {erro}")
@@ -65,11 +82,10 @@ else:
         / "fluxo_financeiro.csv"
     )
 
-    dados = pd.read_csv(caminho_dados)
-    dados = limpar_dados(dados)
+    dados = limpar_dados(carregar_dados(caminho_dados))
 
-
-    problemas = validar_dados(dados)
+# A validação roda nos dois casos (upload ou exemplo)
+problemas = validar_dados(dados)
 
 if problemas:
     st.warning("Foram encontrados problemas nos dados:")
@@ -82,6 +98,7 @@ if problemas:
 dados, indicadores = calcular_indicadores(dados)
 estatisticas = calcular_estatisticas(dados)
 
+# ---------------------------------------------------------- Indicadores
 st.subheader("Indicadores financeiros")
 
 col1, col2, col3, col4 = st.columns(4)
@@ -104,11 +121,12 @@ col4.metric(
 )
 
 st.subheader("Evolução financeira mensal")
-st.line_chart(dados.set_index("data")[["receita", "despesas"]])
+st.pyplot(grafico_receita_despesas(dados))
 
 st.subheader("Variação mensal da receita")
 st.line_chart(dados.set_index("data")["variacao_receita"])
 
+# ---------------------------------------------------------- Estatística
 st.subheader("Análise estatística")
 
 col1, col2, col3 = st.columns(3)
@@ -129,6 +147,62 @@ col6.metric(
     f"{estatisticas['crescimento_receita']:.2f}%",
 )
 
+st.subheader("Análise estatística avançada")
+
+janela = st.slider(
+    "Janela da média móvel (meses)",
+    min_value=2,
+    max_value=min(6, len(dados)),
+    value=3,
+)
+
+dados_mm = adicionar_medias_moveis(dados, janela=janela)
+
+st.line_chart(
+    dados_mm.set_index("data")[
+        ["receita", "receita_mm", "despesas", "despesas_mm"]
+    ]
+)
+
+correlacao = calcular_correlacao(dados)
+tendencia = calcular_tendencia(dados)
+normalidade = verificar_normalidade(dados["fluxo_liquido"])
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric(
+    "Correlação receita × despesas",
+    f"{correlacao['correlacao']:.3f}",
+)
+col2.metric(
+    "Tendência da receita",
+    f"R$ {tendencia['inclinacao']:,.2f} / mês",
+)
+col3.metric("R² da tendência", f"{tendencia['r2']:.3f}")
+
+if tendencia["significativa"]:
+    st.write(
+        f"A tendência da receita é estatisticamente significativa "
+        f"({formatar_p(tendencia['p_valor'])})."
+    )
+else:
+    st.write(
+        f"Não há evidência estatística de tendência na receita "
+        f"({formatar_p(tendencia['p_valor'])})."
+    )
+
+if normalidade["normal"]:
+    st.write(
+        f"O fluxo líquido não rejeita a normalidade "
+        f"(Shapiro-Wilk, {formatar_p(normalidade['p_valor'])})."
+    )
+else:
+    st.write(
+        f"O fluxo líquido se desvia da normalidade "
+        f"(Shapiro-Wilk, {formatar_p(normalidade['p_valor'])})."
+    )
+
+# ------------------------------------------------------------- Previsão
 st.subheader("Previsão de receita")
 
 meses_futuros = st.slider(
@@ -143,19 +217,18 @@ previsoes = prever_proximos_meses(
     meses_futuros=meses_futuros,
 )
 
-st.line_chart(
-    previsoes.set_index("data")["receita_prevista"]
-)
+st.pyplot(grafico_previsao(dados, previsoes))
 st.dataframe(previsoes, use_container_width=True)
 
 st.subheader("Avaliação do modelo")
 
 metricas, resultados = avaliar_modelo(dados)
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 col1.metric("MAE", f"R$ {metricas['mae']:,.2f}")
 col2.metric("RMSE", f"R$ {metricas['rmse']:,.2f}")
+col3.metric("MAPE", f"{metricas['mape']:.2f}%")
 
 st.dataframe(resultados, use_container_width=True)
 
@@ -180,12 +253,75 @@ st.line_chart(
     ]
 )
 
+# ------------------------------------------------------ Séries temporais
+st.subheader("Séries temporais")
+
+st.markdown("**Estacionariedade da receita (teste ADF)**")
+
+if len(dados) > MINIMO_ADF:
+    adf_nivel = verificar_estacionariedade(dados["receita"])
+    adf_diferenca = verificar_estacionariedade(
+        dados["receita"].diff().dropna()
+    )
+
+    col1, col2 = st.columns(2)
+
+    col1.metric("ADF - receita original", formatar_p(adf_nivel["p_valor"]))
+    col1.caption(
+        "Estacionária" if adf_nivel["estacionaria"] else "Não estacionária"
+    )
+
+    col2.metric(
+        "ADF - receita diferenciada",
+        formatar_p(adf_diferenca["p_valor"]),
+    )
+    col2.caption(
+        "Estacionária"
+        if adf_diferenca["estacionaria"]
+        else "Não estacionária"
+    )
+else:
+    st.info(
+        f"O teste ADF exige mais de {MINIMO_ADF} registros "
+        f"para dar um resultado confiável."
+    )
+
+st.markdown("**Decomposição: tendência e sazonalidade**")
+
+if len(dados) >= 2 * PERIODO_SAZONAL:
+    st.pyplot(grafico_decomposicao(decompor_serie(dados)))
+else:
+    st.info(
+        f"A decomposição sazonal exige pelo menos {2 * PERIODO_SAZONAL} "
+        f"meses de dados (dois ciclos completos)."
+    )
+
+st.markdown("**Previsão com Holt-Winters x regressão linear**")
+
+previsoes_hw = prever_holt_winters(dados, meses_futuros=meses_futuros)
+
+st.pyplot(grafico_previsao(dados, previsoes, previsoes_hw))
+
+st.markdown("**Validação walk-forward (um mês à frente)**")
+
+if len(dados) > TREINO_MINIMO:
+    metricas_wf, tabela_wf = validar_walk_forward(dados)
+
+    st.dataframe(
+        pd.DataFrame(metricas_wf).T.round(2),
+        use_container_width=True,
+    )
+    st.pyplot(grafico_walk_forward(tabela_wf))
+else:
+    st.info(
+        f"A validação walk-forward exige mais de {TREINO_MINIMO} registros."
+    )
+
+# --------------------------------------------------------------- Dados
 st.subheader("Dados analisados")
 st.dataframe(dados, use_container_width=True)
 
-
-
-
+# ------------------------------------------------------------ Exportação
 st.subheader("Exportar resultados")
 
 arquivo_csv = exportar_csv(dados)
@@ -210,13 +346,12 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-
-
+# ------------------------------------------------------------ Relatório
 st.subheader("Relatório gerencial")
 
 relatorio = gerar_relatorio(
     indicadores["receita_total"],
-    indicadores["despesas_totais"]
+    indicadores["despesas_totais"],
 )
 
 st.text(relatorio)
