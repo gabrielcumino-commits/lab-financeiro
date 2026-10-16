@@ -4,11 +4,16 @@ import matplotlib.dates as mdates
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 
-COR_RECEITA = "#1f77b4"
-COR_DESPESAS = "#d62728"
-COR_REGRESSAO = "#2ca02c"
-COR_HOLT = "#ff7f0e"
-COR_INGENUA = "#7f7f7f"
+# Paleta do projeto (a mesma usada no tema do aplicativo)
+COR_RECEITA = "#1F4E79"      # azul marinho
+COR_DESPESAS = "#C44E52"     # vermelho
+COR_REGRESSAO = "#2A9D8F"    # verde-azulado
+COR_HOLT = "#E9A23B"         # âmbar
+COR_INGENUA = "#8A94A6"      # cinza
+COR_POSITIVO = "#2A9D8F"
+COR_TEXTO = "#1B2B3A"
+COR_TEXTO_SUAVE = "#5B6B7F"
+COR_BORDA = "#C9D1DB"
 
 NOMES_MODELOS = {
     "ingenua": ("Previsão ingênua", COR_INGENUA),
@@ -21,11 +26,41 @@ def _formatar_reais(valor, _posicao=None):
     return "R$ " + f"{valor:,.0f}".replace(",", ".")
 
 
-def _formatar_eixos(ax, titulo):
-    ax.set_title(titulo, fontsize=12, fontweight="bold")
-    ax.yaxis.set_major_formatter(FuncFormatter(_formatar_reais))
+def _formatar_percentual(valor, _posicao=None):
+    return f"{valor:.0f}%"
+
+
+def _formatar_eixos(ax, titulo, percentual=False):
+    ax.set_title(
+        titulo,
+        fontsize=13,
+        fontweight="bold",
+        loc="left",
+        color=COR_TEXTO,
+        pad=12,
+    )
+
+    formato = _formatar_percentual if percentual else _formatar_reais
+    ax.yaxis.set_major_formatter(FuncFormatter(formato))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%Y"))
-    ax.grid(alpha=0.3)
+
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
+
+    for lado in ("top", "right"):
+        ax.spines[lado].set_visible(False)
+    for lado in ("left", "bottom"):
+        ax.spines[lado].set_color(COR_BORDA)
+
+    ax.tick_params(colors=COR_TEXTO_SUAVE)
+
+
+def _finalizar(fig, ax):
+    ax.legend(frameon=False)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    return fig
 
 
 def grafico_receita_despesas(dados):
@@ -37,23 +72,74 @@ def grafico_receita_despesas(dados):
 
     ax.plot(
         dados["data"], dados["receita"],
-        marker="o", color=COR_RECEITA, label="Receita",
+        marker="o", color=COR_RECEITA, linewidth=2.2, label="Receita",
     )
     ax.plot(
         dados["data"], dados["despesas"],
-        marker="o", color=COR_DESPESAS, label="Despesas",
+        marker="o", color=COR_DESPESAS, linewidth=2.2, label="Despesas",
     )
     ax.fill_between(
         dados["data"], dados["despesas"], dados["receita"],
-        color=COR_RECEITA, alpha=0.12, label="Fluxo líquido",
+        color=COR_RECEITA, alpha=0.10, label="Fluxo líquido",
     )
 
     _formatar_eixos(ax, "Receita e despesas mensais")
-    ax.legend()
+
+    return _finalizar(fig, ax)
+
+
+def grafico_variacao_mensal(dados):
+    """Variação percentual da receita mês a mês (verde = alta, vermelho = queda)."""
+    dados = dados.sort_values("data").dropna(subset=["variacao_receita"])
+
+    cores = [
+        COR_POSITIVO if valor >= 0 else COR_DESPESAS
+        for valor in dados["variacao_receita"]
+    ]
+
+    fig = Figure(figsize=(10, 3.8))
+    ax = fig.subplots()
+
+    ax.bar(dados["data"], dados["variacao_receita"], width=20, color=cores)
+    ax.axhline(0, color=COR_BORDA, linewidth=1)
+
+    _formatar_eixos(ax, "Variação mensal da receita", percentual=True)
+
     fig.autofmt_xdate()
     fig.tight_layout()
 
     return fig
+
+
+def grafico_medias_moveis(dados_mm, janela):
+    """Receita e despesas com a média móvel destacada."""
+    dados_mm = dados_mm.sort_values("data")
+
+    fig = Figure(figsize=(10, 4.5))
+    ax = fig.subplots()
+
+    ax.plot(
+        dados_mm["data"], dados_mm["receita"],
+        color=COR_RECEITA, linewidth=1.5, alpha=0.35,
+    )
+    ax.plot(
+        dados_mm["data"], dados_mm["receita_mm"],
+        color=COR_RECEITA, linewidth=3,
+        label=f"Receita (média móvel de {janela} meses)",
+    )
+    ax.plot(
+        dados_mm["data"], dados_mm["despesas"],
+        color=COR_DESPESAS, linewidth=1.5, alpha=0.35,
+    )
+    ax.plot(
+        dados_mm["data"], dados_mm["despesas_mm"],
+        color=COR_DESPESAS, linewidth=3,
+        label=f"Despesas (média móvel de {janela} meses)",
+    )
+
+    _formatar_eixos(ax, "Médias móveis")
+
+    return _finalizar(fig, ax)
 
 
 def grafico_previsao(dados, previsoes, previsoes_hw=None):
@@ -68,7 +154,7 @@ def grafico_previsao(dados, previsoes, previsoes_hw=None):
 
     ax.plot(
         dados["data"], dados["receita"],
-        marker="o", color=COR_RECEITA, label="Receita real",
+        marker="o", color=COR_RECEITA, linewidth=2.2, label="Receita real",
     )
 
     def tracar(tabela, cor, rotulo, largura, transparencia):
@@ -89,11 +175,8 @@ def grafico_previsao(dados, previsoes, previsoes_hw=None):
         tracar(previsoes_hw, COR_HOLT, "Previsão (Holt-Winters)", 1.5, 1)
 
     _formatar_eixos(ax, "Previsão de receita")
-    ax.legend()
-    fig.autofmt_xdate()
-    fig.tight_layout()
 
-    return fig
+    return _finalizar(fig, ax)
 
 
 def grafico_walk_forward(tabela):
@@ -105,7 +188,7 @@ def grafico_walk_forward(tabela):
 
     ax.plot(
         tabela["data"], tabela["receita_real"],
-        marker="o", color="black", linewidth=2, label="Receita real",
+        marker="o", color=COR_TEXTO, linewidth=2.2, label="Receita real",
     )
 
     for coluna, (rotulo, cor) in NOMES_MODELOS.items():
@@ -116,11 +199,8 @@ def grafico_walk_forward(tabela):
             )
 
     _formatar_eixos(ax, "Validação walk-forward (previsão um mês à frente)")
-    ax.legend()
-    fig.autofmt_xdate()
-    fig.tight_layout()
 
-    return fig
+    return _finalizar(fig, ax)
 
 
 def grafico_decomposicao(decomposicao):
@@ -130,16 +210,19 @@ def grafico_decomposicao(decomposicao):
 
     topo.plot(
         decomposicao.index, decomposicao["observado"],
-        color=COR_RECEITA, label="Observado",
+        color=COR_RECEITA, linewidth=1.8, label="Observado",
     )
     topo.plot(
         decomposicao.index, decomposicao["tendencia"],
-        color=COR_HOLT, linewidth=2, label="Tendência",
+        color=COR_HOLT, linewidth=2.5, label="Tendência",
     )
     _formatar_eixos(topo, "Decomposição da receita")
-    topo.legend()
+    topo.legend(frameon=False)
 
-    meio.plot(decomposicao.index, decomposicao["sazonalidade"], color=COR_REGRESSAO)
+    meio.plot(
+        decomposicao.index, decomposicao["sazonalidade"],
+        color=COR_REGRESSAO, linewidth=1.8,
+    )
     _formatar_eixos(meio, "Sazonalidade")
 
     base.bar(

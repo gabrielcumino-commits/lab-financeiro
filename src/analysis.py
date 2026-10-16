@@ -1,4 +1,4 @@
-
+import numpy as np
 import pandas as pd
 
 
@@ -8,11 +8,16 @@ def calcular_indicadores(dados):
     dados["data"] = pd.to_datetime(dados["data"])
     dados["fluxo_liquido"] = dados["receita"] - dados["despesas"]
 
+    # Receita zero deixa a margem indefinida (NaN) em vez de infinita
+    receita_valida = dados["receita"].where(dados["receita"] != 0)
+
     dados["margem_liquida"] = (
-        dados["fluxo_liquido"] / dados["receita"]
+        dados["fluxo_liquido"] / receita_valida
     ) * 100
 
-    dados["variacao_receita"] = dados["receita"].pct_change() * 100
+    # Mês anterior com receita zero também gera infinito: vira NaN
+    variacao = dados["receita"].pct_change() * 100
+    dados["variacao_receita"] = variacao.replace([np.inf, -np.inf], np.nan)
 
     indicadores = {
         "receita_total": dados["receita"].sum(),
@@ -24,16 +29,18 @@ def calcular_indicadores(dados):
     return dados, indicadores
 
 
-
-
-
 def calcular_estatisticas(dados):
     receita = dados["receita"]
     fluxo = dados["fluxo_liquido"]
 
-    crescimento_receita = (
-        (receita.iloc[-1] / receita.iloc[0]) - 1
-    ) * 100
+    primeira_receita = receita.iloc[0]
+
+    if primeira_receita == 0:
+        crescimento_receita = float("nan")
+    else:
+        crescimento_receita = (
+            (receita.iloc[-1] / primeira_receita) - 1
+        ) * 100
 
     estatisticas = {
         "receita_media": receita.mean(),

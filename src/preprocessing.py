@@ -1,13 +1,12 @@
-
 import pandas as pd
+
+COLUNAS_OBRIGATORIAS = ["data", "receita", "despesas"]
 
 
 def limpar_dados(dados):
     dados = dados.copy()
 
-    colunas_obrigatorias = ["data", "receita", "despesas"]
-
-    for coluna in colunas_obrigatorias:
+    for coluna in COLUNAS_OBRIGATORIAS:
         if coluna not in dados.columns:
             raise ValueError(
                 f"Coluna obrigatória ausente: {coluna}"
@@ -29,7 +28,7 @@ def limpar_dados(dados):
     )
 
     dados = dados.dropna(
-        subset=colunas_obrigatorias
+        subset=COLUNAS_OBRIGATORIAS
     )
 
     dados = dados.sort_values("data").reset_index(drop=True)
@@ -37,12 +36,31 @@ def limpar_dados(dados):
     return dados
 
 
+def contar_linhas_removidas(dados_originais, dados_limpos):
+    """Quantas linhas a limpeza descartou (valores ausentes ou inválidos)."""
+    return max(len(dados_originais) - len(dados_limpos), 0)
+
+
+def detectar_meses_faltantes(dados):
+    """
+    Lista os meses ("AAAA-MM") que faltam entre o primeiro e o último mês
+    da série. Os modelos assumem meses consecutivos.
+    """
+    if dados.empty:
+        return []
+
+    meses = pd.to_datetime(dados["data"]).dt.to_period("M")
+
+    esperados = pd.period_range(meses.min(), meses.max(), freq="M")
+    faltantes = esperados.difference(pd.PeriodIndex(meses.unique()))
+
+    return [str(mes) for mes in faltantes]
+
+
 def validar_dados(dados):
     problemas = []
 
-    colunas_obrigatorias = ["data", "receita", "despesas"]
-
-    for coluna in colunas_obrigatorias:
+    for coluna in COLUNAS_OBRIGATORIAS:
         if coluna not in dados.columns:
             problemas.append(
                 f"Coluna obrigatória ausente: {coluna}"
@@ -76,7 +94,3 @@ def validar_dados(dados):
         )
 
     return problemas
-
-
-
-# teste de validaçao dos dados financeiros

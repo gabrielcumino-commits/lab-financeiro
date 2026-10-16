@@ -3,10 +3,13 @@ import pandas as pd
 from matplotlib.figure import Figure
 
 from src.timeseries import decompor_serie, prever_holt_winters, validar_walk_forward
+from src.features import adicionar_medias_moveis
 from src.visualization import (
     grafico_decomposicao,
+    grafico_medias_moveis,
     grafico_previsao,
     grafico_receita_despesas,
+    grafico_variacao_mensal,
     grafico_walk_forward,
     salvar_figura,
 )
@@ -71,3 +74,21 @@ def test_salvar_figura_cria_pasta_e_arquivo(tmp_path):
 
     assert resultado.exists()
     assert resultado.stat().st_size > 0
+
+
+def test_grafico_variacao_mensal_ignora_primeiro_mes():
+    dados = criar_dados()
+    dados["variacao_receita"] = dados["receita"].pct_change() * 100
+
+    fig = grafico_variacao_mensal(dados)
+
+    # uma barra por mês com variação (o primeiro mês não tem)
+    assert len(fig.axes[0].patches) == len(dados) - 1
+
+
+def test_grafico_medias_moveis():
+    dados_mm = adicionar_medias_moveis(criar_dados(), janela=3)
+
+    fig = grafico_medias_moveis(dados_mm, janela=3)
+
+    assert len(fig.axes[0].lines) == 4
